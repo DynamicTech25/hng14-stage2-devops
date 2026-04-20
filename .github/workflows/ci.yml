@@ -9,7 +9,7 @@ on:
 jobs:
 
   # =========================
-  # 1. LINT STAGE (FAST FAIL)
+  # 1. LINT STAGE
   # =========================
   lint:
     runs-on: ubuntu-latest
@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: "18"
 
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         run: |
           cd frontend
           npm install
@@ -46,7 +46,7 @@ jobs:
 
 
   # =========================
-  # 2. TEST STAGE (CORE SAFETY CHECK)
+  # 2. TEST STAGE
   # =========================
   test:
     runs-on: ubuntu-latest
@@ -76,7 +76,7 @@ jobs:
 
 
   # =========================
-  # 3. BUILD STAGE (DOCKER VALIDATION)
+  # 3. BUILD STAGE
   # =========================
   build:
     runs-on: ubuntu-latest
@@ -100,7 +100,7 @@ jobs:
 
 
   # =========================
-  # 4. SECURITY SCAN (TRIVY)
+  # 4. SECURITY SCAN (FIXED)
   # =========================
   security:
     runs-on: ubuntu-latest
@@ -117,15 +117,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install wget -y
-          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.0_Linux-64bit.deb
-          sudo dpkg -i trivy_0.50.0_Linux-64bit.deb
+
+          TRIVY_VERSION="0.58.1"
+
+          wget https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.deb
+
+          sudo dpkg -i trivy_${TRIVY_VERSION}_Linux-64bit.deb
 
       - name: Scan image (CRITICAL only)
         run: trivy image --severity CRITICAL hng-api:scan
 
 
   # =========================
-  # 5. FINAL STAGE (SUMMARY)
+  # 5. FINAL STAGE
   # =========================
   finalize:
     runs-on: ubuntu-latest
