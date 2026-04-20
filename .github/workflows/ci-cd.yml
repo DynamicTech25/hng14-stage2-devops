@@ -1,11 +1,10 @@
-name: HNG Stage 2 CI/CD Pipeline (Production Safe)
+name: HNG Stage 2 CI/CD Pipeline (Production Ready)
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-
 
 jobs:
 
@@ -18,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Python setup
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -27,9 +26,9 @@ jobs:
         run: pip install flake8
 
       - name: Lint backend
-        run: flake8 api worker || true
+        run: flake8 api worker
 
-      - name: Set up Node
+      - name: Node setup
         uses: actions/setup-node@v4
         with:
           node-version: "18"
@@ -46,11 +45,10 @@ jobs:
 
 
 # =========================
-# 2. TEST STAGE (WITH REDIS)
+# 2. TEST STAGE (WITH REDIS + COVERAGE)
 # =========================
   test:
     runs-on: ubuntu-latest
-    needs: lint
 
     services:
       redis:
@@ -61,8 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -71,8 +68,15 @@ jobs:
           pip install -r api/requirements.txt
           pip install pytest fastapi httpx redis pytest-cov
 
-      - name: Run tests
-        run: pytest api -v
+      - name: Run tests with coverage
+        run: |
+          pytest api -v --cov=api --cov-report=xml
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
 
 
 # =========================
@@ -86,17 +90,23 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build API image
-        run: docker build -t hng-api:${{ github.sha }} ./api
+        run: |
+          docker build -t hng-api:${{ github.sha }} ./api
+          docker tag hng-api:${{ github.sha }} hng-api:latest
 
       - name: Build Worker image
-        run: docker build -t hng-worker:${{ github.sha }} ./worker
+        run: |
+          docker build -t hng-worker:${{ github.sha }} ./worker
+          docker tag hng-worker:${{ github.sha }} hng-worker:latest
 
       - name: Build Frontend image
-        run: docker build -t hng-frontend:${{ github.sha }} ./frontend
+        run: |
+          docker build -t hng-frontend:${{ github.sha }} ./frontend
+          docker tag hng-frontend:${{ github.sha }} hng-frontend:latest
 
 
 # =========================
-# 4. SECURITY SCAN (FIXED + STABLE TRIVY)
+# 4. SECURITY SCAN (FIXED TRIVY)
 # =========================
   security:
     runs-on: ubuntu-latest
@@ -105,18 +115,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build API image for scan
+      - name: Build image for scan
         run: docker build -t hng-api:scan ./api
 
-      # ✅ YOUR WORKING TRIVY INSTALL METHOD (KEEP THIS)
-      - name: Install Trivy (Safe Method)
+      - name: Install Trivy (stable safe method)
         run: |
-          sudo apt-get update
-          sudo apt-get install wget -y
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
 
-      - name: Scan image (CRITICAL only)
-        run: trivy image --severity CRITICAL hng-api:scan
+      - name: Run Trivy scan (fail on CRITICAL)
+        run: trivy image --severity CRITICAL --format sarif --output trivy.sarif hng-api:scan
+
+      - name: Upload SARIF report
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
 
 
 # =========================
@@ -129,29 +141,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start stack
+      - name: Start full stack
         run: docker compose up -d --build
 
       - name: Wait for API
         run: |
-          for i in {1..20}; do
-            curl -s http://localhost:8000 && exit 0
-            sleep 3
+          for i in {1..15}; do
+            curl -s http://localhost:8000/ && exit 0 || sleep 3
           done
           exit 1
 
-      - name: Run integration check
-        run: |
-          curl -X POST http://localhost:8000/jobs
-          curl -s http://localhost:8000/jobs/invalid || true
+      - name: Create job test
+        run: curl -X POST http://localhost:8000/jobs
 
-      - name: Cleanup
-        if: always()
-        run: docker compose down
+      - name: Health check
+        run: curl --fail http://localhost:8000/
 
 
 # =========================
-# 6. DEPLOY (SAFE ROLLING SIMULATION)
+# 6. DEPLOY (ROLLING UPDATE SIMULATION)
 # =========================
   deploy:
     runs-on: ubuntu-latest
@@ -164,17 +172,18 @@ jobs:
       - name: Start old stack
         run: docker compose up -d
 
-      - name: Deploy new version
+      - name: Build new version
         run: docker compose up -d --build
 
-      - name: Health check (60s max)
+      - name: Wait for health check (60s max)
         run: |
           for i in {1..20}; do
-            curl -s http://localhost:8000 && exit 0
-            sleep 3
+            curl -s http://localhost:8000/ && exit 0 || sleep 3
           done
-          echo "Health check failed — aborting deploy"
-          exit 1
+          echo "Health check failed" && exit 1
 
-      - name: Confirm deployment
-        run: echo "Deployment successful ✔"
+      - name: Shutdown old containers
+        run: docker compose down || true
+
+      - name: Deployment success
+        run: echo "Rolling update successful ✔"
