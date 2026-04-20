@@ -6,6 +6,8 @@ import os
 app = FastAPI()
 
 # ---------- Redis Connection (SAFE + LAZY) ----------
+
+
 def get_redis():
     return redis.Redis.from_url(
         os.getenv("REDIS_URL", "redis://localhost:6379"),
