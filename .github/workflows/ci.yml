@@ -8,9 +8,9 @@ on:
 
 jobs:
 
-# =========================
-# 1. LINT STAGE (FAST FAIL)
-# =========================
+  # =========================
+  # 1. LINT STAGE (FAST FAIL)
+  # =========================
   lint:
     runs-on: ubuntu-latest
 
@@ -44,33 +44,40 @@ jobs:
           cd frontend
           npx eslint . || true
 
-          
-# =========================
-# 2. TEST STAGE (CORE SAFETY CHECK)
-# =========================
- test:
-  runs-on: ubuntu-latest
 
-  services:
-    redis:
-      image: redis:7
-      ports:
-        - 6379:6379
+  # =========================
+  # 2. TEST STAGE (CORE SAFETY CHECK)
+  # =========================
+  test:
+    runs-on: ubuntu-latest
 
-  steps:
-    - uses: actions/checkout@v4
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
 
-    - uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - run: pip install -r api/requirements.txt
-    - run: pip install pytest fastapi httpx
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    - run: pytest api -v
-# =========================
-# 3. BUILD STAGE (DOCKER VALIDATION)
-# =========================
+      - name: Install dependencies
+        run: |
+          pip install -r api/requirements.txt
+          pip install pytest fastapi httpx redis
+
+      - name: Run tests
+        run: pytest api -v
+
+
+  # =========================
+  # 3. BUILD STAGE (DOCKER VALIDATION)
+  # =========================
   build:
     runs-on: ubuntu-latest
     needs: test
@@ -92,9 +99,9 @@ jobs:
         run: docker build -t hng-frontend:${{ github.sha }} ./frontend
 
 
-# =========================
-# 4. SECURITY SCAN (OPTIONAL BUT GOOD FOR HNG BONUS)
-# =========================
+  # =========================
+  # 4. SECURITY SCAN (TRIVY)
+  # =========================
   security:
     runs-on: ubuntu-latest
     needs: build
@@ -117,9 +124,9 @@ jobs:
         run: trivy image --severity CRITICAL hng-api:scan
 
 
-# =========================
-# 5. FINAL STAGE (SAFE SUMMARY CHECK)
-# =========================
+  # =========================
+  # 5. FINAL STAGE (SUMMARY)
+  # =========================
   finalize:
     runs-on: ubuntu-latest
     needs: security
