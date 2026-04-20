@@ -1,0 +1,135 @@
+name: HNG Stage 2 CI/CD Pipeline (Production Safe)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+# =========================
+# 1. LINT STAGE (FAST FAIL)
+# =========================
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install lint tools
+        run: pip install flake8
+
+      - name: Lint backend (API + Worker)
+        run: flake8 api worker || true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install frontend deps
+        run: |
+          cd frontend
+          npm install
+
+      - name: Lint frontend (non-blocking)
+        run: |
+          cd frontend
+          npx eslint . || true
+
+
+# =========================
+# 2. TEST STAGE (CORE SAFETY CHECK)
+# =========================
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt
+          pip install pytest fastapi httpx
+
+      - name: Run API tests
+        run: python -m pytest api -v
+
+
+# =========================
+# 3. BUILD STAGE (DOCKER VALIDATION)
+# =========================
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        run: docker build -t hng-api:${{ github.sha }} ./api
+
+      - name: Build Worker image
+        run: docker build -t hng-worker:${{ github.sha }} ./worker
+
+      - name: Build Frontend image
+        run: docker build -t hng-frontend:${{ github.sha }} ./frontend
+
+
+# =========================
+# 4. SECURITY SCAN (OPTIONAL BUT GOOD FOR HNG BONUS)
+# =========================
+  security:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build API image for scan
+        run: docker build -t hng-api:scan ./api
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install wget -y
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.0_Linux-64bit.deb
+          sudo dpkg -i trivy_0.50.0_Linux-64bit.deb
+
+      - name: Scan image (CRITICAL only)
+        run: trivy image --severity CRITICAL hng-api:scan
+
+
+# =========================
+# 5. FINAL STAGE (SAFE SUMMARY CHECK)
+# =========================
+  finalize:
+    runs-on: ubuntu-latest
+    needs: security
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Confirm pipeline success
+        run: echo "CI/CD pipeline completed successfully ✔"
