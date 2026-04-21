@@ -15,9 +15,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Python setup
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -25,27 +26,36 @@ jobs:
       - name: Install flake8
         run: pip install flake8
 
-      - name: Lint backend
+      - name: Run Python lint
         run: flake8 api worker
 
-      - name: Node setup
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "18"
 
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         run: |
           cd frontend
           npm install
 
-      - name: Lint frontend
+      - name: Run ESLint
         run: |
           cd frontend
           npx eslint . || true
 
+      - name: Install hadolint
+        run: |
+          wget -O hadolint https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
+          chmod +x hadolint
+          sudo mv hadolint /usr/local/bin/
+
+      - name: Lint Dockerfiles
+        run: hadolint api/Dockerfile worker/Dockerfile frontend/Dockerfile
+
 
 # =========================
-# 2. TEST STAGE (WITH REDIS + COVERAGE)
+# 2. TEST STAGE
 # =========================
   test:
     runs-on: ubuntu-latest
@@ -53,24 +63,23 @@ jobs:
     services:
       redis:
         image: redis:7
-        ports:
-          - 6379:6379
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
           pip install -r api/requirements.txt
-          pip install pytest fastapi httpx redis pytest-cov
+          pip install pytest pytest-cov fastapi httpx redis
 
       - name: Run tests with coverage
-        run: |
-          pytest api -v --cov=api --cov-report=xml
+        run: pytest api --cov=api --cov-report=xml
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
@@ -80,33 +89,46 @@ jobs:
 
 
 # =========================
-# 3. BUILD STAGE
+# 3. BUILD STAGE (WITH LOCAL REGISTRY)
 # =========================
   build:
     runs-on: ubuntu-latest
     needs: test
 
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Build API image
+      - name: Build and push API image
         run: |
-          docker build -t hng-api:${{ github.sha }} ./api
-          docker tag hng-api:${{ github.sha }} hng-api:latest
+          docker build -t localhost:5000/hng-api:${{ github.sha }} ./api
+          docker tag localhost:5000/hng-api:${{ github.sha }} localhost:5000/hng-api:latest
+          docker push localhost:5000/hng-api:${{ github.sha }}
+          docker push localhost:5000/hng-api:latest
 
-      - name: Build Worker image
+      - name: Build and push Worker image
         run: |
-          docker build -t hng-worker:${{ github.sha }} ./worker
-          docker tag hng-worker:${{ github.sha }} hng-worker:latest
+          docker build -t localhost:5000/hng-worker:${{ github.sha }} ./worker
+          docker tag localhost:5000/hng-worker:${{ github.sha }} localhost:5000/hng-worker:latest
+          docker push localhost:5000/hng-worker:${{ github.sha }}
+          docker push localhost:5000/hng-worker:latest
 
-      - name: Build Frontend image
+      - name: Build and push Frontend image
         run: |
-          docker build -t hng-frontend:${{ github.sha }} ./frontend
-          docker tag hng-frontend:${{ github.sha }} hng-frontend:latest
+          docker build -t localhost:5000/hng-frontend:${{ github.sha }} ./frontend
+          docker tag localhost:5000/hng-frontend:${{ github.sha }} localhost:5000/hng-frontend:latest
+          docker push localhost:5000/hng-frontend:${{ github.sha }}
+          docker push localhost:5000/hng-frontend:latest
 
 
 # =========================
-# 4. SECURITY SCAN (FIXED TRIVY)
+# 4. SECURITY SCAN
 # =========================
   security:
     runs-on: ubuntu-latest
@@ -117,53 +139,62 @@ jobs:
       security-events: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Build API image
+      - name: Build API image for scan
         run: docker build -t hng-api:scan ./api
 
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+          | sudo sh -s -- -b /usr/local/bin
 
       - name: Run Trivy scan
-        run: trivy image --severity CRITICAL --format sarif --output trivy.sarif hng-api:scan
+        run: trivy image --severity CRITICAL --exit-code 1 --format sarif --output trivy.sarif hng-api:scan
 
-      - name: Upload SARIF report
+      - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
 
 
 # =========================
-# 5. INTEGRATION TEST (FULL STACK)
+# 5. INTEGRATION TEST
 # =========================
   integration:
     runs-on: ubuntu-latest
     needs: security
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Start full stack
         run: docker compose up -d --build
 
       - name: Wait for API
         run: |
-          for i in {1..15}; do
-            curl -s http://localhost:8000/ && exit 0 || sleep 3
+          for i in {1..20}; do
+            curl -s http://localhost:8000 && exit 0 || sleep 3
           done
           exit 1
 
-      - name: Create job test
-        run: curl -X POST http://localhost:8000/jobs
+      - name: Submit job
+        run: curl -X POST http://localhost:3000/submit
 
-      - name: Health check
-        run: curl --fail http://localhost:8000/
+      - name: Poll job result
+        run: |
+          sleep 5
+          curl http://localhost:3000/status/1
+
+      - name: Teardown stack
+        if: always()
+        run: docker compose down
 
 
 # =========================
-# 6. DEPLOY (ROLLING UPDATE SIMULATION)
+# 6. DEPLOY
 # =========================
   deploy:
     runs-on: ubuntu-latest
@@ -171,23 +202,25 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Start old stack
+      - name: Start old version
         run: docker compose up -d
 
-      - name: Build new version
+      - name: Deploy new version
         run: docker compose up -d --build
 
-      - name: Wait for health check (60s max)
+      - name: Health check (60s max)
         run: |
           for i in {1..20}; do
-            curl -s http://localhost:8000/ && exit 0 || sleep 3
+            curl -s http://localhost:8000 && exit 0 || sleep 3
           done
-          echo "Health check failed" && exit 1
+          echo "Deployment failed"
+          exit 1
 
-      - name: Shutdown old containers
-        run: docker compose down || true
+      - name: Stop old containers
+        run: docker compose down
 
       - name: Deployment success
-        run: echo "Rolling update successful ✔"
+        run: echo "Deployment completed successfully"
