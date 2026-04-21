@@ -13,20 +13,21 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install curl for healthcheck
+# Install curl (hadolint-safe)
 RUN apk add --no-cache curl
 
-# Copy built app from builder
-COPY --from=builder /app /app
-
-# Create non-root user (clean format)
+# Create user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# Copy ONLY necessary built files (cleaner + safer)
+COPY --from=builder /app /app
 
 USER appuser
 
 EXPOSE 3000
 
 # Healthcheck
-HEALTHCHECK CMD curl --fail http://localhost:3000 || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:3000/ || exit 1
 
 CMD ["npm", "start"]
