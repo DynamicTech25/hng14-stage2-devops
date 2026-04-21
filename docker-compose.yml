@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
 
   redis:
@@ -20,8 +18,8 @@ services:
     build: ./api
     ports:
       - "8000:8000"
-    env_file:
-      - ./api/.env
+    environment:
+      REDIS_URL: redis://redis:6379
     depends_on:
       redis:
         condition: service_healthy
@@ -56,7 +54,7 @@ services:
       - ./frontend/.env
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     networks:
       - app-network
     restart: always

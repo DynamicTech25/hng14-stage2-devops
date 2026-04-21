@@ -48,3 +48,4 @@ def test_get_job_not_found(mock_get_redis):
     data = response.json()
     assert "error" in data
     assert data["error"] == "not found"
+    
