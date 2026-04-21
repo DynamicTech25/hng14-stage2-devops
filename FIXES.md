@@ -1,9 +1,9 @@
-## Fix 1
+## Fix 1 - FastAPI dependency not installed
 - File: api/main.py
 - Issue: FastAPI dependency not installed causing ModuleNotFoundError
 - Fix: Created virtual environment and installed dependencies using requirements.txt
 
-## Fix 2
+## Fix 2 - No Root Endpoint
 - File: api/main.py
 - Issue: No root endpoint defined, causing "Not Found" at base URL
 - Fix: Added a root ("/") endpoint for basic health response

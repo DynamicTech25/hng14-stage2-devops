@@ -178,7 +178,7 @@ This Deployment is simulated within GitHub Actions and can be extended to cloud 
 - Pipeline runs entirely on GitHub free tier
 - No external cloud infrastructure required
 
-# In Conclusion, This project demonstrates a complete DevOps workflow, including:
+In Conclusion, This project demonstrates a complete DevOps workflow, including:
 - Automation
 - Testing
 - Security
@@ -186,7 +186,7 @@ This Deployment is simulated within GitHub Actions and can be extended to cloud 
 
 # Screenshots
 ### CI Pipeline Success
-![CI](screenshots/CI-pipeline-success.png)
+![CI](Screenshots/CI-pipeline-success.png)
 
 ### Security Scan (Trivy)
-![Security](screenshots/security-scanning-trivy.png)
+![Security](Screenshots/security-scanning-trivy.png)
