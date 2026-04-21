@@ -87,7 +87,7 @@ jobs:
           path: coverage.xml
 
   # =========================
-  # 3. BUILD STAGE (WITH LOCAL REGISTRY)
+  # 3. BUILD STAGE
   # =========================
   build:
     runs-on: ubuntu-latest
@@ -106,23 +106,17 @@ jobs:
       - name: Build and push API image
         run: |
           docker build -t localhost:5000/hng-api:${{ github.sha }} ./api
-          docker tag localhost:5000/hng-api:${{ github.sha }} localhost:5000/hng-api:latest
           docker push localhost:5000/hng-api:${{ github.sha }}
-          docker push localhost:5000/hng-api:latest
 
       - name: Build and push Worker image
         run: |
           docker build -t localhost:5000/hng-worker:${{ github.sha }} ./worker
-          docker tag localhost:5000/hng-worker:${{ github.sha }} localhost:5000/hng-worker:latest
           docker push localhost:5000/hng-worker:${{ github.sha }}
-          docker push localhost:5000/hng-worker:latest
 
       - name: Build and push Frontend image
         run: |
           docker build -t localhost:5000/hng-frontend:${{ github.sha }} ./frontend
-          docker tag localhost:5000/hng-frontend:${{ github.sha }} localhost:5000/hng-frontend:latest
           docker push localhost:5000/hng-frontend:${{ github.sha }}
-          docker push localhost:5000/hng-frontend:latest
 
   # =========================
   # 4. SECURITY SCAN
@@ -139,7 +133,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build API image for scan
+      - name: Build API image
         run: docker build -t hng-api:scan ./api
 
       - name: Install Trivy
@@ -148,13 +142,7 @@ jobs:
           | sudo sh -s -- -b /usr/local/bin
 
       - name: Run Trivy scan
-        run: trivy image --severity CRITICAL --exit-code 1 --format sarif --output
-          trivy.sarif hng-api:scan
-
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: trivy.sarif
+        run: trivy image --severity CRITICAL --exit-code 1 hng-api:scan
 
   # =========================
   # 5. INTEGRATION TEST
@@ -172,21 +160,29 @@ jobs:
 
       - name: Wait for API
         run: |
+          echo "Waiting for API..."
+
           for i in {1..30}; do
-            curl -s http://localhost:8000 && exit 0
-            echo "waiting for api..."
+            if curl -fs http://127.0.0.1:8000/ >/dev/null; then
+              echo "API is ready"
+              exit 0
+            fi
+
+            echo "waiting..."
             sleep 2
           done
 
+          echo "API failed"
+          docker compose logs api
           exit 1
 
       - name: Submit job
-        run: curl -X POST http://localhost:3000/submit
+        run: curl -X POST http://127.0.0.1:3000/submit
 
       - name: Poll job result
         run: |
           sleep 5
-          curl http://localhost:3000/status/1
+          curl http://127.0.0.1:3000/status/1
 
       - name: Teardown stack
         if: always()
@@ -204,22 +200,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Start old version
-        run: docker compose up -d
-
-      - name: Deploy new version
+      - name: Deploy stack
         run: docker compose up -d --build
 
-      - name: Health check (60s max)
+      - name: Health check
         run: |
+          echo "Checking deployment..."
+
           for i in {1..20}; do
-            curl -s http://localhost:8000 && exit 0 || sleep 3
+            if curl -fs http://127.0.0.1:8000/ >/dev/null; then
+              echo "Deployment successful"
+              exit 0
+            fi
+            sleep 3
           done
+
           echo "Deployment failed"
+          docker compose logs api
           exit 1
 
-      - name: Stop old containers
+      - name: Cleanup old containers
         run: docker compose down
 
-      - name: Deployment success
+      - name: Success message
         run: echo "Deployment completed successfully"
