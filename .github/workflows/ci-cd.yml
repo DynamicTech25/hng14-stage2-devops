@@ -7,7 +7,6 @@ on:
     branches: [ main ]
 
 env:
-  REGISTRY: localhost:5000
   TAG_SHA: ${{ github.sha }}
 
 jobs:
@@ -79,7 +78,7 @@ jobs:
           path: coverage.xml
 
   # =========================
-  # 3. BUILD + PUSH (CACHE FIXED)
+  # 3. BUILD STAGE (SHA + CACHE FIXED)
   # =========================
   build:
     runs-on: ubuntu-latest
@@ -88,58 +87,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      # -------------------------
-      # API
-      # -------------------------
       - name: Build API
         run: |
           DOCKER_BUILDKIT=1 docker build \
             --cache-from=type=gha \
             --cache-to=type=gha,mode=max \
-            -t $REGISTRY/hng-api:${TAG_SHA} \
-            -t $REGISTRY/hng-api:latest \
+            -t hng-api:${TAG_SHA} \
+            -t hng-api:latest \
             ./api
 
-      # -------------------------
-      # WORKER
-      # -------------------------
       - name: Build Worker
         run: |
           DOCKER_BUILDKIT=1 docker build \
             --cache-from=type=gha \
             --cache-to=type=gha,mode=max \
-            -t $REGISTRY/hng-worker:${TAG_SHA} \
-            -t $REGISTRY/hng-worker:latest \
+            -t hng-worker:${TAG_SHA} \
+            -t hng-worker:latest \
             ./worker
 
-      # -------------------------
-      # FRONTEND
-      # -------------------------
       - name: Build Frontend
         run: |
           DOCKER_BUILDKIT=1 docker build \
             --cache-from=type=gha \
             --cache-to=type=gha,mode=max \
-            -t $REGISTRY/hng-frontend:${TAG_SHA} \
-            -t $REGISTRY/hng-frontend:latest \
+            -t hng-frontend:${TAG_SHA} \
+            -t hng-frontend:latest \
             ./frontend
-
-      # -------------------------
-      # PUSH ALL IMAGES
-      # -------------------------
-      - name: Push images
-        run: |
-          docker push $REGISTRY/hng-api:${TAG_SHA}
-          docker push $REGISTRY/hng-api:latest
-
-          docker push $REGISTRY/hng-worker:${TAG_SHA}
-          docker push $REGISTRY/hng-worker:latest
-
-          docker push $REGISTRY/hng-frontend:${TAG_SHA}
-          docker push $REGISTRY/hng-frontend:latest
 
   # =========================
   # 4. SECURITY SCAN
@@ -193,7 +168,7 @@ jobs:
       - run: docker compose down
 
   # =========================
-  # 6. DEPLOY (ROLLING + SHA FIXED)
+  # 6. DEPLOY (SIMULATED ROLLING UPDATE)
   # =========================
   deploy:
     runs-on: ubuntu-latest
@@ -203,15 +178,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pull versioned images
-        run: |
-          docker pull $REGISTRY/hng-api:${TAG_SHA}
-          docker pull $REGISTRY/hng-worker:${TAG_SHA}
-          docker pull $REGISTRY/hng-frontend:${TAG_SHA}
-
-      # -------------------------
-      # Rolling updates
-      # -------------------------
       - name: Rolling update API
         run: docker compose up -d --no-deps api
 
@@ -221,9 +187,6 @@ jobs:
       - name: Rolling update Frontend
         run: docker compose up -d --no-deps frontend
 
-      # -------------------------
-      # Health check
-      # -------------------------
       - name: Health check
         run: |
           for i in {1..20}; do
