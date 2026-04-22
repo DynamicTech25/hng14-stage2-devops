@@ -27,7 +27,7 @@ jobs:
         run: pip install flake8
 
       - name: Run Python lint
-        run: flake8 api worker
+        run: flake8 api worker --exclude=venv,env,__pycache__,.venv
 
       - name: Set up Node
         uses: actions/setup-node@v4
