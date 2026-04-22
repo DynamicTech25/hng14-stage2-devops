@@ -80,7 +80,7 @@ jobs:
           pip install pytest pytest-cov fastapi httpx redis
 
       - name: Run tests with coverage
-        run: pytest api --cov=api --cov-report=xml
+        run: PYTHONPATH=. pytest api -v --cov=api --cov-report=xml
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
@@ -145,6 +145,13 @@ jobs:
 
       - name: Run Trivy scan
         run: trivy image --severity CRITICAL --exit-code 1 hng-api:scan
+
+      - name: Upload SARIF artifact
+        if: always ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sarif
+          path: trivy-results/
 
   # =========================
   # 5. INTEGRATION TEST
