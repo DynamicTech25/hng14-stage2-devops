@@ -7,6 +7,7 @@ on:
     branches: [ main ]
 
 env:
+  REGISTRY: localhost:5000
   TAG_SHA: ${{ github.sha }}
 
 jobs:
@@ -89,32 +90,47 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # API
       - name: Build API
         run: |
           DOCKER_BUILDKIT=1 docker build \
             --cache-from=type=gha \
             --cache-to=type=gha,mode=max \
-            -t hng-api:${TAG_SHA} \
-            -t hng-api:latest \
+            -t $REGISTRY/hng-api:${TAG_SHA} \
+            -t $REGISTRY/hng-api:latest \
             ./api
 
+      # WORKER
       - name: Build Worker
         run: |
           DOCKER_BUILDKIT=1 docker build \
             --cache-from=type=gha \
             --cache-to=type=gha,mode=max \
-            -t hng-worker:${TAG_SHA} \
-            -t hng-worker:latest \
+            -t $REGISTRY/hng-worker:${TAG_SHA} \
+            -t $REGISTRY/hng-worker:latest \
             ./worker
 
+      # FRONTEND
       - name: Build Frontend
         run: |
           DOCKER_BUILDKIT=1 docker build \
             --cache-from=type=gha \
             --cache-to=type=gha,mode=max \
-            -t hng-frontend:${TAG_SHA} \
-            -t hng-frontend:latest \
+            -t $REGISTRY/hng-frontend:${TAG_SHA} \
+            -t $REGISTRY/hng-frontend:latest \
             ./frontend
+
+      # PUSH IMAGES
+      - name: Push images
+        run: |
+          docker push $REGISTRY/hng-api:${TAG_SHA}
+          docker push $REGISTRY/hng-api:latest
+
+          docker push $REGISTRY/hng-worker:${TAG_SHA}
+          docker push $REGISTRY/hng-worker:latest
+
+          docker push $REGISTRY/hng-frontend:${TAG_SHA}
+          docker push $REGISTRY/hng-frontend:latest
 
   # =========================
   # 4. SECURITY SCAN
@@ -155,6 +171,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # FIX: ensure env exists for compose
+      - name: Create CI env file
+        run: cp .env.example .env
+
       - run: docker compose up -d --build
 
       - run: |
@@ -168,7 +188,7 @@ jobs:
       - run: docker compose down
 
   # =========================
-  # 6. DEPLOY (SIMULATED ROLLING UPDATE)
+  # 6. DEPLOY (ROLLING + SHA FIXED)
   # =========================
   deploy:
     runs-on: ubuntu-latest
@@ -178,6 +198,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Pull versioned images
+        run: |
+          docker pull $REGISTRY/hng-api:${TAG_SHA}
+          docker pull $REGISTRY/hng-worker:${TAG_SHA}
+          docker pull $REGISTRY/hng-frontend:${TAG_SHA}
+
+      # Rolling updates
       - name: Rolling update API
         run: docker compose up -d --no-deps api
 
@@ -187,6 +214,7 @@ jobs:
       - name: Rolling update Frontend
         run: docker compose up -d --no-deps frontend
 
+      # Health check
       - name: Health check
         run: |
           for i in {1..20}; do
