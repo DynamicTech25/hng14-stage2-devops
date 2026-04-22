@@ -7,16 +7,17 @@ __pycache__/
 *.pyd
 *.log
 *.sqlite3
-*.gitignore
 
 # virtual environments
 venv/
 env/
 .venv/
 
-# pytest cache
+# pytest / coverage
 .pytest_cache/
 .coverage
+coverage/
+htmlcov/
 
 # =========================
 # Node / Frontend
@@ -35,8 +36,9 @@ build/
 # =========================
 *.pid
 *.log
+*.tar
 
-# Docker override files
+# Docker override (optional)
 docker-compose.override.yml
 
 # =========================
@@ -46,6 +48,9 @@ docker-compose.override.yml
 .env.local
 .env.*.local
 
+# IMPORTANT: allow example config
+!.env.example
+
 # =========================
 # IDE / OS
 # =========================
@@ -53,9 +58,3 @@ docker-compose.override.yml
 .idea/
 .DS_Store
 Thumbs.db
-
-# =========================
-# Test artifacts
-# =========================
-coverage/
-htmlcov/

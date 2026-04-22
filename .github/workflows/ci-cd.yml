@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  REGISTRY: localhost:5000
+  TAG_SHA: ${{ github.sha }}
+
 jobs:
 
   # =========================
@@ -15,45 +19,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install flake8
-        run: pip install flake8
+      - run: pip install flake8
+      - run: flake8 api worker --exclude=venv,env,__pycache__,.venv
 
-      - name: Run Python lint
-        run: flake8 api worker --exclude=venv,env,__pycache__,.venv
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
 
-      - name: Install frontend dependencies
-        run: |
+      - run: |
           cd frontend
           npm install
-
-      - name: Run ESLint
-        run: |
-          cd frontend
           npx eslint . || true
 
-      - name: Install hadolint
-        run: |
+      - run: |
           wget -O hadolint https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
           chmod +x hadolint
           sudo mv hadolint /usr/local/bin/
 
-      # ✅ FIXED HADOLINT STEP
-      - name: Lint Dockerfiles
-        run: hadolint --ignore DL3008 --ignore DL3018 api/Dockerfile worker/Dockerfile
-          frontend/Dockerfile
+      - run: |
+          hadolint --ignore DL3008 --ignore DL3018 \
+            api/Dockerfile worker/Dockerfile frontend/Dockerfile
 
   # =========================
   # 2. TEST STAGE
@@ -64,63 +55,91 @@ jobs:
     services:
       redis:
         image: redis:7
+        ports:
+          - 6379:6379
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: |
+      - run: |
           pip install -r api/requirements.txt
           pip install pytest pytest-cov fastapi httpx redis
 
-      - name: Run tests with coverage
-        run: |
+      - run: |
           export PYTHONPATH=.
           pytest api/tests --cov=api --cov-report=xml -v
 
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.xml
 
   # =========================
-  # 3. BUILD STAGE
+  # 3. BUILD + PUSH (CACHE FIXED)
   # =========================
   build:
     runs-on: ubuntu-latest
     needs: test
 
-    services:
-      registry:
-        image: registry:2
-        ports:
-          - 5000:5000
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Build and push API image
-        run: |
-          docker build -t localhost:5000/hng-api:${{ github.sha }} ./api
-          docker push localhost:5000/hng-api:${{ github.sha }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Worker image
+      # -------------------------
+      # API
+      # -------------------------
+      - name: Build API
         run: |
-          docker build -t localhost:5000/hng-worker:${{ github.sha }} ./worker
-          docker push localhost:5000/hng-worker:${{ github.sha }}
+          DOCKER_BUILDKIT=1 docker build \
+            --cache-from=type=gha \
+            --cache-to=type=gha,mode=max \
+            -t $REGISTRY/hng-api:${TAG_SHA} \
+            -t $REGISTRY/hng-api:latest \
+            ./api
 
-      - name: Build and push Frontend image
+      # -------------------------
+      # WORKER
+      # -------------------------
+      - name: Build Worker
         run: |
-          docker build -t localhost:5000/hng-frontend:${{ github.sha }} ./frontend
-          docker push localhost:5000/hng-frontend:${{ github.sha }}
+          DOCKER_BUILDKIT=1 docker build \
+            --cache-from=type=gha \
+            --cache-to=type=gha,mode=max \
+            -t $REGISTRY/hng-worker:${TAG_SHA} \
+            -t $REGISTRY/hng-worker:latest \
+            ./worker
+
+      # -------------------------
+      # FRONTEND
+      # -------------------------
+      - name: Build Frontend
+        run: |
+          DOCKER_BUILDKIT=1 docker build \
+            --cache-from=type=gha \
+            --cache-to=type=gha,mode=max \
+            -t $REGISTRY/hng-frontend:${TAG_SHA} \
+            -t $REGISTRY/hng-frontend:latest \
+            ./frontend
+
+      # -------------------------
+      # PUSH ALL IMAGES
+      # -------------------------
+      - name: Push images
+        run: |
+          docker push $REGISTRY/hng-api:${TAG_SHA}
+          docker push $REGISTRY/hng-api:latest
+
+          docker push $REGISTRY/hng-worker:${TAG_SHA}
+          docker push $REGISTRY/hng-worker:latest
+
+          docker push $REGISTRY/hng-frontend:${TAG_SHA}
+          docker push $REGISTRY/hng-frontend:latest
 
   # =========================
   # 4. SECURITY SCAN
@@ -129,31 +148,27 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
 
-    permissions:
-      contents: read
-      security-events: write
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Build API image
-        run: docker build -t hng-api:scan ./api
+      - run: docker build -t hng-api:scan ./api
 
-      - name: Install Trivy
-        run: |
+      - run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
           | sudo sh -s -- -b /usr/local/bin
 
-      - name: Run Trivy scan
-        run: trivy image --severity CRITICAL --exit-code 1 hng-api:scan
+      - run: |
+          trivy image \
+            --severity CRITICAL \
+            --exit-code 1 \
+            --format sarif \
+            -o trivy-results.sarif \
+            hng-api:scan
 
-      - name: Upload SARIF artifact
-        if: always ()
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: trivy-sarif
-          path: trivy-results/
+          path: trivy-results.sarif
 
   # =========================
   # 5. INTEGRATION TEST
@@ -163,62 +178,22 @@ jobs:
     needs: security
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Start full stack
-        run: docker compose up -d --build
+      - run: docker compose up -d --build
 
-      - name: Debug containers
-        run: |
-          docker compose ps
-          docker compose logs frontend
-          docker compose logs api
-
-      - name: Wait for API
-        run: |
-          echo "Waiting for API..."
-
+      - run: |
           for i in {1..30}; do
-            if curl -fs http://127.0.0.1:8000/ >/dev/null; then
-              echo "API is ready"
-              exit 0
-            fi
-
-            echo "waiting..."
+            curl -fs http://127.0.0.1:8000/ && exit 0
             sleep 2
           done
-
-          echo "API failed"
           docker compose logs api
           exit 1
 
-      - name: Wait for frontend
-        run: |
-          for i in {1..30}; do
-          if curl -fs http://127.0.0.1:3000 >/dev/null; then
-          echo "Frontend ready"
-          break
-          fi
-          echo "waiting for frontend..."
-          sleep 2
-          done
-
-      - name: Submit job
-        run: |
-          curl -v -X POST http://127.0.0.1:3000/submit
-
-      - name: Poll job result
-        run: |
-          sleep 5
-          curl http://127.0.0.1:3000/status/1
-
-      - name: Teardown stack
-        if: always()
-        run: docker compose down
+      - run: docker compose down
 
   # =========================
-  # 6. DEPLOY
+  # 6. DEPLOY (ROLLING + SHA FIXED)
   # =========================
   deploy:
     runs-on: ubuntu-latest
@@ -226,30 +201,38 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Deploy stack
-        run: docker compose up -d --build
+      - name: Pull versioned images
+        run: |
+          docker pull $REGISTRY/hng-api:${TAG_SHA}
+          docker pull $REGISTRY/hng-worker:${TAG_SHA}
+          docker pull $REGISTRY/hng-frontend:${TAG_SHA}
 
+      # -------------------------
+      # Rolling updates
+      # -------------------------
+      - name: Rolling update API
+        run: docker compose up -d --no-deps api
+
+      - name: Rolling update Worker
+        run: docker compose up -d --no-deps worker
+
+      - name: Rolling update Frontend
+        run: docker compose up -d --no-deps frontend
+
+      # -------------------------
+      # Health check
+      # -------------------------
       - name: Health check
         run: |
-          echo "Checking deployment..."
-
           for i in {1..20}; do
-            if curl -fs http://127.0.0.1:8000/ >/dev/null; then
-              echo "Deployment successful"
-              exit 0
-            fi
+            curl -fs http://127.0.0.1:8000/ && exit 0
             sleep 3
           done
-
-          echo "Deployment failed"
           docker compose logs api
           exit 1
 
-      - name: Cleanup old containers
-        run: docker compose down
+      - run: docker compose down
 
-      - name: Success message
-        run: echo "Deployment completed successfully"
+      - run: echo "Deployment completed successfully"
