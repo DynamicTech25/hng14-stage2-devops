@@ -80,7 +80,9 @@ jobs:
           pip install pytest pytest-cov fastapi httpx redis
 
       - name: Run tests with coverage
-        run: PYTHONPATH=. pytest api -v --cov=api --cov-report=xml
+        run: |
+          export PYTHONPATH=.
+          pytest api/tests --cov=api --cov-report=xml -v
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
