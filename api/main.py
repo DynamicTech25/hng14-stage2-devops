@@ -20,6 +20,9 @@ def get_redis():
 def root():
     return {"message": "API is running"}
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 # ---------- Create Job ----------
 @app.post("/jobs")

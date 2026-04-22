@@ -13,14 +13,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install curl (safe + hadolint compliant)
+# Install curl (hadolint compliant)
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create user FIRST (fix ownership issues)
+# Create non-root user FIRST
 RUN useradd -m appuser
 
-# Copy dependencies to correct home
+# Copy dependencies
 COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy app
@@ -33,8 +33,8 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 
 EXPOSE 8000
 
-# Healthcheck (CI-safe)
+# HEALTHCHECK (IMPORTANT FIX)
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD curl -f http://localhost:8000/ || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -169,6 +169,12 @@ jobs:
       - name: Start full stack
         run: docker compose up -d --build
 
+      - name: Debug containers
+        run: |
+          docker compose ps
+          docker compose logs frontend
+          docker compose logs api
+
       - name: Wait for API
         run: |
           echo "Waiting for API..."
@@ -187,8 +193,20 @@ jobs:
           docker compose logs api
           exit 1
 
+      - name: Wait for frontend
+        run: |
+          for i in {1..30}; do
+          if curl -fs http://127.0.0.1:3000 >/dev/null; then
+          echo "Frontend ready"
+          break
+          fi
+          echo "waiting for frontend..."
+          sleep 2
+          done
+
       - name: Submit job
-        run: curl -X POST http://127.0.0.1:3000/submit
+        run: |
+          curl -v -X POST http://127.0.0.1:3000/submit
 
       - name: Poll job result
         run: |
